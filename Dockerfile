@@ -16,16 +16,18 @@ COPY check_gpu.py ./
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 RUN git clone https://github.com/dwadden/multivers.git ./multivers && \
-    python check_gpu.py
+    chmod +x check_gpu.py
 RUN pip install virtualenv  && \
     virtualenv mult && \
     . mult/bin/activate &&  \
     pip install --upgrade pip && \
-    pip install -r multivers/requirements.txt && \
-    python multivers/script/get_checkpoint.py longformer_large_science && \
+    pip install -r multivers/requirements.txt
+RUN python multivers/script/get_checkpoint.py longformer_large_science && \
     python multivers/script/get_checkpoint.py fever_sci && \
     mv checkpoints multivers/
 COPY app/streamlit_app.py ./
+COPY start.sh ./
+RUN chmod +x start.sh
 ENV EVIDENCE_API_IP=
 HEALTHCHECK CMD curl --fail http://localhost:80/_stcore/health
-ENTRYPOINT ["streamlit", "run", "streamlit_app.py", "--server.port=80", "--server.address=0.0.0.0"]
+ENTRYPOINT ["./start.sh"]

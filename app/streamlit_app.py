@@ -26,6 +26,8 @@ label_highlight_color = {'CONTRADICT': '#faa',
 @st.cache_resource
 def download_models():
     nltk.download('punkt')
+    # make multivers download needed model
+    predict_with_multivers()
     model = RobertaForSequenceClassification.from_pretrained('kruthof/climateattention-10k-upscaled', num_labels=2)
     tokenizer = AutoTokenizer.from_pretrained("climatebert/distilroberta-base-climate-f")
     return model, tokenizer
@@ -181,14 +183,15 @@ def get_verified_claims():
 
 # Create the Streamlit app
 def main():
-    st.set_page_config(page_title="Verify news article with Multivers",
+    st.set_page_config(page_title="Verify news article using different verification models",
                        page_icon=":earth_americas:",
                        layout='wide')
     model, tokenizer = download_models()
 
     # Add a sidebar with links
     st.sidebar.title("Omdena, Local Chapter, 🇩🇪 Cologne")
-    project_link = '[Project Description](https://omdena.com/chapter-challenges/detecting-bias-in-climate-reporting-in-english-and-german-language-news-media/)'
+    project_link = '[Project Description](https://omdena.com/chapter-challenges/detecting-bias-in-climate-reporting' \
+                   '-in-english-and-german-language-news-media/)'
     st.sidebar.markdown(project_link, unsafe_allow_html=True)
     github_link = '[Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
     st.sidebar.markdown(github_link, unsafe_allow_html=True)
