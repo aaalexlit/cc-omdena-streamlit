@@ -1,0 +1,8 @@
+transformers
+codetiming==1.4.0
+newspaper3k==0.2.8
+jsonlines==3.1.0
+requests
+streamlit==1.20.0
+st-annotated-text==3.0.0
+nltk
