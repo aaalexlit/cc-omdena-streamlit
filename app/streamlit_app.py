@@ -12,10 +12,15 @@ import nltk
 import torch
 import gc
 import os
+import time
+from pathlib import Path
 
-CLAIMS_FILE = "claims.jsonl"
-CORPUS_FILE = "corpus.jsonl"
-PREDS_FILE = "preds.jsonl"
+if 'rand_num' not in st.session_state:
+    st.session_state.rand_num = int(time.time() * 1000)
+
+CLAIMS_FILE = f"claims_{st.session_state.rand_num}.jsonl"
+CORPUS_FILE = f"corpus_{st.session_state.rand_num}.jsonl"
+PREDS_FILE = f"preds_{st.session_state.rand_num}.jsonl"
 
 label_highlight_color = {'CONTRADICT': '#faa',
                          'REFUTES': '#faa',
@@ -73,12 +78,11 @@ def get_text_from_input(text: str):
 
 def predict_with_multivers():
     gc.collect()
-    cmd = 'source mult/bin/activate; python multivers/multivers/predict.py \
+    cmd = f'source mult/bin/activate; python multivers/multivers/predict.py \
         --checkpoint_path=multivers/checkpoints/fever_sci.ckpt \
-        --input_file="claims.jsonl" \
-        --batch_size=5 \
-        --corpus_file="corpus.jsonl" \
-        --output_file="preds.jsonl"'
+        --input_file="{CLAIMS_FILE}" \
+        --corpus_file="{CORPUS_FILE}" \
+        --output_file="{PREDS_FILE}"'
     subprocess.call(cmd, shell=True, executable='/bin/bash')
 
 
@@ -145,39 +149,44 @@ def convert_evidences_from_abstracts_to_multivers_format(claims):
 
 def get_verified_claims():
     claim_id_evidence_ids = {}
-    with jsonlines.open(PREDS_FILE, 'r') as preds_reader:
-        for pred_line in preds_reader.iter():
-            if pred_line["evidence"]:
-                evidences = []
-                for key in pred_line["evidence"]:
-                    d = {'evidence_id': key,
-                         'label': pred_line["evidence"][key]['label'],
-                         'sentences': pred_line["evidence"][key]['sentences']
-                         }
-                    evidences.append(d)
-                claim_id_evidence_ids[pred_line["id"]] = {"evidences": evidences}
+    try:
+        with jsonlines.open(PREDS_FILE, 'r') as preds_reader:
+            for pred_line in preds_reader.iter():
+                if pred_line["evidence"]:
+                    evidences = []
+                    for key in pred_line["evidence"]:
+                        d = {'evidence_id': key,
+                             'label': pred_line["evidence"][key]['label'],
+                             'sentences': pred_line["evidence"][key]['sentences']
+                             }
+                        evidences.append(d)
+                    claim_id_evidence_ids[pred_line["id"]] = {"evidences": evidences}
 
-    for claim_id in claim_id_evidence_ids:
-        with jsonlines.open(CLAIMS_FILE, 'r') as claims_reader:
-            for line_num, claim_line in enumerate(claims_reader.iter()):
-                if line_num == claim_id:
-                    claim_id_evidence_ids[claim_id]['claim_text'] = claim_line['claim']
-                    claim_id_evidence_ids[claim_id]['claim_id'] = claim_line['id']
+        for claim_id in claim_id_evidence_ids:
+            with jsonlines.open(CLAIMS_FILE, 'r') as claims_reader:
+                for line_num, claim_line in enumerate(claims_reader.iter()):
+                    if line_num == claim_id:
+                        claim_id_evidence_ids[claim_id]['claim_text'] = claim_line['claim']
+                        claim_id_evidence_ids[claim_id]['claim_id'] = claim_line['id']
 
-    for claim_id in claim_id_evidence_ids:
-        evidences = claim_id_evidence_ids[claim_id]['evidences']
-        for evidence in evidences:
-            with jsonlines.open(CORPUS_FILE, 'r') as corpus_reader:
-                for line_num, corpus_line in enumerate(corpus_reader.iter()):
-                    if str(line_num) == evidence['evidence_id']:
-                        evidence['evidence_title'] = corpus_line['title']
-                        evidence['evidence_text'] = corpus_line['abstract']
-                        evidence['doi'] = corpus_line['doi']
-                        evidence['year'] = corpus_line['year']
-                        sentences_text = []
-                        for sent_num in evidence['sentences']:
-                            sentences_text.append(corpus_line['abstract'][sent_num])
-                        evidence['sentences_text'] = sentences_text
+        for claim_id in claim_id_evidence_ids:
+            evidences = claim_id_evidence_ids[claim_id]['evidences']
+            for evidence in evidences:
+                with jsonlines.open(CORPUS_FILE, 'r') as corpus_reader:
+                    for line_num, corpus_line in enumerate(corpus_reader.iter()):
+                        if str(line_num) == evidence['evidence_id']:
+                            evidence['evidence_title'] = corpus_line['title']
+                            evidence['evidence_text'] = corpus_line['abstract']
+                            evidence['doi'] = corpus_line['doi']
+                            evidence['year'] = corpus_line['year']
+                            sentences_text = []
+                            for sent_num in evidence['sentences']:
+                                sentences_text.append(corpus_line['abstract'][sent_num])
+                            evidence['sentences_text'] = sentences_text
+    finally:
+        Path.unlink(Path(PREDS_FILE), missing_ok=True)
+        Path.unlink(Path(CLAIMS_FILE), missing_ok=True)
+        Path.unlink(Path(CORPUS_FILE), missing_ok=True)
     return claim_id_evidence_ids
 
 
@@ -196,9 +205,9 @@ def main():
     github_link = '[Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
     st.sidebar.markdown(github_link, unsafe_allow_html=True)
 
-    st.header("Media article scientific verificaton using Multivers")
+    st.header("Media article scientific verification")
 
-    tab_bias_detection, tab_how_to, tab_faq = st.tabs(["Scientific verification with Multivers", "How-To", "FAQ"])
+    tab_bias_detection, tab_how_to, tab_faq = st.tabs(["Scientific verification", "How-To", "FAQ"])
 
     with tab_bias_detection:
 
@@ -220,9 +229,7 @@ def main():
 
         # Verify with Multivers
         if st.button("Verify article text with Multivers"):
-            with st.expander("Climate related sentences that we'll attempt to verify"):
-                for claim in input_sentences:
-                    st.write(claim)
+            show_sentences_to_run_inference_on(input_sentences)
 
             with st.spinner(text='Retrieving relevant evidences'):
                 convert_evidences_from_abstracts_to_multivers_format(input_sentences)
@@ -234,55 +241,19 @@ def main():
                     st.warning("According to Multivers model, there's \
             not enough information to verify any claim from the article")
                 else:
-                    for claim_id, claim in verified_claims.items():
-                        st.markdown(f"### **Claim  :orange[{claim['claim_text']}]**")
-                        for evidence in claim['evidences']:
-                            label = evidence['label']
-                            st.write("**Label**: ")
-                            annotated_text((label, "",
-                                            label_highlight_color[label],
-                                            'black'))
-                            st.markdown(f"""**Article title**: {evidence['evidence_title']}  
-                **Year**: {evidence['year']}  
-                **Article link**: {evidence['doi']}""")
-                            if evidence['sentences']:
-                                for sent in evidence['sentences_text']:
-                                    st.markdown(f"**Phrase**: {sent}")
-                            else:
-                                st.markdown(f"**Abstract**: {evidence['evidence_text']}")
-                        st.markdown("""---""")
+                    output_multivers_predictions(verified_claims)
 
+        # Classify text and show result
         if st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER"):
-            with st.expander("Climate related sentences that we'll attempt to verify"):
-                for claim in input_sentences:
-                    st.write(claim)
+            show_sentences_to_run_inference_on(input_sentences)
             with st.spinner(text='Verifying the statements'):
                 res = get_verified_against_phrases(input_sentences)
                 if not res:
                     st.warning("According to the model, there's \
                                 not enough information to verify any claim from the article")
-                for claim, evidences in zip(input_sentences, res):
-                    show_claim = False
-                    for evidence in evidences:
-                        if evidence['label'] != 'NOT_ENOUGH_INFO':
-                            show_claim = True
-                    if show_claim:
-                        st.markdown(f"### **Claim  :orange[{claim}]**")
-                        for evidence in evidences:
-                            if evidence['label'] != 'NOT_ENOUGH_INFO':
-                                label = evidence['label']
-                                st.write("**Label**: ")
-                                annotated_text((label, "",
-                                                label_highlight_color[label],
-                                                'black'))
-                                st.markdown(f"""**Article title**: {evidence['title']}  
-                              **Year**: {evidence['year']}  
-                              **Article link**: {evidence['doi']}  
-                              **Phrase**: {evidence['text']}  
-                              **Probability**: {evidence['probability']:.2f}""")
-                        st.markdown("""---""")
+                else:
+                    output_climatebert_prediction(input_sentences, res)
 
-                        # Classify text and show result
         # if st.button("Detect Global Warming stance in climate related sentences"):
         #   with st.spinner(text='Performing stance detection'):
         #     res = predict_gw_stance(input_sentences, model, tokenizer)
@@ -301,6 +272,55 @@ def main():
 
     with tab_faq:
         st.write("tbd")
+
+
+def show_sentences_to_run_inference_on(input_sentences):
+    with st.expander("Climate related sentences that we'll attempt to verify"):
+        for claim in input_sentences:
+            st.write(claim)
+
+
+def output_climatebert_prediction(input_sentences, res):
+    for claim, evidences in zip(input_sentences, res):
+        show_claim = False
+        for evidence in evidences:
+            if evidence['label'] != 'NOT_ENOUGH_INFO':
+                show_claim = True
+        if show_claim:
+            st.markdown(f"### **Claim  :orange[{claim}]**")
+            for evidence in evidences:
+                if evidence['label'] != 'NOT_ENOUGH_INFO':
+                    label = evidence['label']
+                    st.write("**Label**: ")
+                    annotated_text((label, "",
+                                    label_highlight_color[label],
+                                    'black'))
+                    st.markdown(f"""**Article title**: {evidence['title']}  
+                              **Year**: {evidence['year']}  
+                              **Article link**: {evidence['doi']}  
+                              **Phrase**: {evidence['text']}  
+                              **Probability**: {evidence['probability']:.2f}""")
+            st.markdown("""---""")
+
+
+def output_multivers_predictions(verified_claims):
+    for claim_id, claim in verified_claims.items():
+        st.markdown(f"### **Claim  :orange[{claim['claim_text']}]**")
+        for evidence in claim['evidences']:
+            label = evidence['label']
+            st.write("**Label**: ")
+            annotated_text((label, "",
+                            label_highlight_color[label],
+                            'black'))
+            st.markdown(f"""**Article title**: {evidence['evidence_title']}  
+                **Year**: {evidence['year']}  
+                **Article link**: {evidence['doi']}""")
+            if evidence['sentences']:
+                for sent in evidence['sentences_text']:
+                    st.markdown(f"**Phrase**: {sent}")
+            else:
+                st.markdown(f"**Abstract**: {evidence['evidence_text']}")
+        st.markdown("""---""")
 
 
 if __name__ == "__main__":
