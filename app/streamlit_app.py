@@ -1,6 +1,6 @@
 from newspaper import Article
 from nltk.tokenize import sent_tokenize
-from transformers import AutoTokenizer, pipeline, RobertaForSequenceClassification
+from transformers import AutoTokenizer, pipeline, RobertaForSequenceClassification, AutoModelForSequenceClassification
 import streamlit as st
 from codetiming import Timer
 import requests
@@ -33,18 +33,39 @@ def download_models():
     nltk.download('punkt')
     # make multivers download needed model
     predict_with_multivers()
-    model = RobertaForSequenceClassification.from_pretrained('kruthof/climateattention-10k-upscaled', num_labels=2)
-    tokenizer = AutoTokenizer.from_pretrained("climatebert/distilroberta-base-climate-f")
-    return model, tokenizer
 
 
-def is_about_climate(texts, model, tokenizer):
+@st.cache_resource
+def get_climate_sentence_detection_model():
+    return RobertaForSequenceClassification.from_pretrained('kruthof/climateattention-10k-upscaled',
+                                                            num_labels=2)
+
+
+@st.cache_resource
+def get_climatebert_tokenizer():
+    return AutoTokenizer.from_pretrained("climatebert/distilroberta-base-climate-f")
+
+
+@st.cache_resource
+def get_claimbuster_model():
+    return AutoModelForSequenceClassification.from_pretrained("lucafrost/ClaimBuster-DeBERTaV2")
+
+
+@st.cache_resource
+def get_claimbuster_tokenizer():
+    return AutoTokenizer.from_pretrained("lucafrost/ClaimBuster-DeBERTaV2")
+
+
+def is_about_climate(texts: [str]):
     if torch.cuda.is_available():
         device = 0
         batch_size = 128
     else:
         device = -1
         batch_size = 1
+
+    model = get_climate_sentence_detection_model()
+    tokenizer = get_climatebert_tokenizer()
     pipe = pipeline("text-classification", model=model,
                     tokenizer=tokenizer, device=device,
                     truncation=True, padding=True)
@@ -57,9 +78,41 @@ def is_about_climate(texts, model, tokenizer):
     return labels, probs
 
 
-def filter_climate_related(sentences, model, tokenizer):
-    labels, _ = is_about_climate(sentences, model, tokenizer)
+def filter_climate_related(sentences):
+    labels, _ = is_about_climate(sentences)
     return [doc for label, doc in zip(labels, sentences) if label == 'Yes']
+
+
+def is_claim(sentences):
+    tokenizer = get_claimbuster_tokenizer()
+    model = get_claimbuster_model()
+    if torch.cuda.is_available():
+        device = 0
+        batch_size = 128
+    else:
+        device = -1
+        batch_size = 1
+
+    pipe = pipeline("text-classification", model=model,
+                    tokenizer=tokenizer, device=device,
+                    truncation=True, padding=True)
+    labels, probs = [], []
+    for out in pipe(sentences, batch_size=batch_size):
+        labels.append(out['label'])
+        probs.append(out['score'])
+
+    return list(map(lambda l: model.config.label2id[l], labels)), probs
+
+
+def filter_claims(sentences: [str]):
+    if 'claim_prob_threshold' in st.session_state:
+        threshold = st.session_state.claim_prob_threshold
+    else:
+        threshold = 0.5
+    labels, probs = is_claim(sentences)
+    # for the time being will return Unimportant Factual Statement (UFS) and Check-worthy Factual Statement (CFS)
+    return [sentence for sentence, label, prob in zip(sentences, labels, probs) if
+            label in [1, 2] and prob > threshold]
 
 
 def get_text_from_url(news_article_url):
@@ -87,7 +140,8 @@ def predict_with_multivers():
 
 
 @Timer(text="get_abstracts_matching_claims elapsed time: {seconds:.0f} s")
-def get_abstracts_matching_claims(claims, top_k=10, threshold=0.7):
+def get_abstracts_matching_claims(top_k=10, threshold=0.7):
+    claims = st.session_state.filtered_input_sentences
     api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/abstract/evidence"
 
     responses = []
@@ -104,7 +158,8 @@ def get_abstracts_matching_claims(claims, top_k=10, threshold=0.7):
 
 
 @Timer(text="get_verified_against_phrases elapsed time: {seconds:.0f} s")
-def get_verified_against_phrases(claims, top_k=10, threshold=0.7):
+def get_verified_against_phrases(top_k=10, threshold=0.7):
+    claims = st.session_state.filtered_input_sentences
     api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/phrase/verify"
 
     responses = []
@@ -120,8 +175,9 @@ def get_verified_against_phrases(claims, top_k=10, threshold=0.7):
     return responses
 
 
-def convert_evidences_from_abstracts_to_multivers_format(claims):
-    evidence_abstracts = get_abstracts_matching_claims(claims)
+def convert_evidences_from_abstracts_to_multivers_format():
+    claims = st.session_state.filtered_input_sentences
+    evidence_abstracts = get_abstracts_matching_claims()
     with jsonlines.open(CLAIMS_FILE, 'w') as claims_writer, \
             jsonlines.open(CORPUS_FILE, 'w') as corpus_writer:
         doc_id = 0
@@ -195,44 +251,48 @@ def main():
     st.set_page_config(page_title="Verify news article using different verification models",
                        page_icon=":earth_americas:",
                        layout='wide')
-    model, tokenizer = download_models()
 
-    # Add a sidebar with links
-    st.sidebar.title("Omdena, Local Chapter, 🇩🇪 Cologne")
-    project_link = '[Project Description](https://omdena.com/chapter-challenges/detecting-bias-in-climate-reporting' \
-                   '-in-english-and-german-language-news-media/)'
-    st.sidebar.markdown(project_link, unsafe_allow_html=True)
-    github_link = '[Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
-    st.sidebar.markdown(github_link, unsafe_allow_html=True)
+    pre_download_used_models()
 
-    st.header("Media article scientific verification")
-
-    tab_bias_detection, tab_how_to, tab_faq = st.tabs(["Scientific verification", "How-To", "FAQ"])
+    add_sidebar()
+    tab_bias_detection, tab_faq, tab_how_to = set_header_and_tabs()
 
     with tab_bias_detection:
+        st.text_area("Enter Text or URL of a media article about Climate",
+                     placeholder="CO2 is not the cause of our current warming trend",
+                     on_change=on_input_text_change,
+                     key='original_input_text')
 
-        st.write("""Enter a Text or URL below""")
+        if 'input_sentences' not in st.session_state:
+            st.stop()
+        display_text_to_analyze()
+        filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
+                                              args=('verified_with_multivers', 'verified_with_climatebert'))
 
-        text_input = st.text_area("Enter Text")
-        is_link = text_input.startswith('http')
-        text_input = get_text_from_input(text_input)
-        if is_link:
-            with st.expander('Text that was extracted from the link and will be analyzed'):
-                st.write(text_input)
-        input_sentences = sent_tokenize(text_input)
+        filter_claims_checkbox = st.checkbox('Extract check worthy claims', on_change=on_filter_state_change,
+                                             args=('verified_with_multivers', 'verified_with_climatebert'))
 
-        if st.checkbox('Filter climate related sentences'):
-            input_sentences = filter_climate_related(input_sentences, model, tokenizer)
-            if not input_sentences:
-                st.warning("None of the extracted sentences are climate related.")
-                st.stop()
+        if 'refilter' in st.session_state and st.session_state.refilter:
+            if filter_climate_checkbox:
+                with st.spinner("Filtering climate related sentences"):
+                    st.session_state.filtered_input_sentences = filter_climate_related(
+                        st.session_state.filtered_input_sentences)
+                if not st.session_state.filtered_input_sentences:
+                    st.error("None of the extracted sentences are climate related.")
+                    st.stop()
+            if filter_claims_checkbox:
+                with st.spinner("Detecting claims"):
+                    st.session_state.filtered_input_sentences = filter_claims(st.session_state.filtered_input_sentences)
+                if not st.session_state.filtered_input_sentences:
+                    st.error("No check worthy claims were found in the input ")
+                    st.stop()
+            st.session_state.refilter = False
 
         # Verify with Multivers
         if st.button("Verify article text with Multivers"):
-            show_sentences_to_run_inference_on(input_sentences)
-
+            clear_keys('verified_with_multivers', 'verified_with_climatebert')
             with st.spinner(text='Retrieving relevant evidences'):
-                convert_evidences_from_abstracts_to_multivers_format(input_sentences)
+                convert_evidences_from_abstracts_to_multivers_format()
             with st.spinner(text='Verifying'):
                 predict_with_multivers()
             with st.spinner(text='Preparing output'):
@@ -241,18 +301,43 @@ def main():
                     st.warning("According to Multivers model, there's \
             not enough information to verify any claim from the article")
                 else:
-                    output_multivers_predictions(verified_claims)
+                    st.session_state.verified_with_multivers = verified_claims
 
         # Classify text and show result
         if st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER"):
-            show_sentences_to_run_inference_on(input_sentences)
+            clear_keys('verified_with_multivers', 'verified_with_climatebert', 'slider_value_changed')
             with st.spinner(text='Verifying the statements'):
-                res = get_verified_against_phrases(input_sentences)
+                res = get_verified_against_phrases()
                 if not res:
                     st.warning("According to the model, there's \
                                 not enough information to verify any claim from the article")
                 else:
-                    output_climatebert_prediction(input_sentences, res)
+                    st.session_state.verified_with_climatebert = res
+
+        multivers_container = st.container()
+        if 'verified_with_multivers' in st.session_state:
+            multivers_container.header("Multivers predictions")
+            show_sentences_to_run_inference_on(multivers_container)
+            output_multivers_predictions(multivers_container)
+        else:
+            multivers_container.empty()
+
+        climatebert_container = st.container()
+        if 'verified_with_climatebert' in st.session_state:
+            climatebert_container.header("ClimateBERT fine-tuned on Climate-FEVER predictions")
+            show_sentences_to_run_inference_on(climatebert_container)
+            climatebert_container.slider(label='**Choose probability threshold**',
+                                         min_value=0.0,
+                                         max_value=1.0,
+                                         value=0.5,
+                                         step=0.05,
+                                         key='prob_slider',
+                                         on_change=output_climatebert_prediction_slider,
+                                         args=(climatebert_container,))
+            if 'slider_value_changed' not in st.session_state:
+                output_climatebert_prediction(climatebert_container)
+        else:
+            climatebert_container.empty()
 
         # if st.button("Detect Global Warming stance in climate related sentences"):
         #   with st.spinner(text='Performing stance detection'):
@@ -274,53 +359,122 @@ def main():
         st.write("tbd")
 
 
-def show_sentences_to_run_inference_on(input_sentences):
-    with st.expander("Climate related sentences that we'll attempt to verify"):
-        for claim in input_sentences:
-            st.write(claim)
+def on_filter_state_change(*keys_to_remove):
+    clear_keys(*keys_to_remove)
+    st.session_state.refilter = True
+    st.session_state.filtered_input_sentences = st.session_state.input_sentences
 
 
-def output_climatebert_prediction(input_sentences, res):
-    for claim, evidences in zip(input_sentences, res):
-        show_claim = False
-        for evidence in evidences:
-            if evidence['label'] != 'NOT_ENOUGH_INFO':
-                show_claim = True
-        if show_claim:
-            st.markdown(f"### **Claim  :orange[{claim}]**")
-            for evidence in evidences:
-                if evidence['label'] != 'NOT_ENOUGH_INFO':
-                    label = evidence['label']
-                    st.write("**Label**: ")
-                    annotated_text((label, "",
-                                    label_highlight_color[label],
-                                    'black'))
-                    st.markdown(f"""**Article title**: {evidence['title']}  
-                              **Year**: {evidence['year']}  
-                              **Article link**: {evidence['doi']}  
-                              **Phrase**: {evidence['text']}  
-                              **Probability**: {evidence['probability']:.2f}""")
+def on_input_text_change():
+    clear_keys('filtered_input_sentences', 'verified_with_climatebert', 'verified_with_multivers')
+    st.session_state.input_text = get_text_from_input(st.session_state.original_input_text)
+    # Check if the text is about climate and then continue
+    with st.spinner("Check if the input is Climate related text"):
+        st.session_state.not_climate_related_text = len(st.session_state.input_text.strip()) and \
+                                                    not filter_climate_related([st.session_state.input_text])
+    st.session_state.input_sentences = sent_tokenize(st.session_state.input_text)
+    st.session_state.filtered_input_sentences = st.session_state.input_sentences
+
+
+def display_text_to_analyze():
+    if not len(st.session_state.input_text.strip()):
+        st.stop()
+    if st.session_state.not_climate_related_text:
+        st.warning("Looks like the text you entered doesn't concern the topic of Climate")
+    if 'original_input_text' in st.session_state and st.session_state.original_input_text.startswith('http'):
+        with st.expander('Text that was extracted from the link and will be analyzed'):
+            st.write(st.session_state.input_text)
+
+
+def clear_keys(*keys_to_remove):
+    for key in keys_to_remove:
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def set_header_and_tabs():
+    st.header("Media article scientific verification")
+    tab_bias_detection, tab_how_to, tab_faq = st.tabs(["Scientific verification", "How-To", "FAQ"])
+    return tab_bias_detection, tab_faq, tab_how_to
+
+
+def add_sidebar():
+    # Add a sidebar with links
+    st.sidebar.title("Omdena, Local Chapter, 🇩🇪 Cologne")
+    project_link = '[Project Description](https://omdena.com/chapter-challenges/detecting-bias-in-climate-reporting' \
+                   '-in-english-and-german-language-news-media/)'
+    st.sidebar.markdown(project_link, unsafe_allow_html=True)
+    github_link = '[Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
+    st.sidebar.markdown(github_link, unsafe_allow_html=True)
+
+
+def pre_download_used_models():
+    download_models()
+    get_climatebert_tokenizer()
+    get_climate_sentence_detection_model()
+
+
+def show_sentences_to_run_inference_on(container):
+    with container:
+        with st.expander("Climate related sentences that we'll attempt to verify"):
+            for claim in st.session_state.filtered_input_sentences:
+                st.write(claim)
+
+def output_climatebert_prediction_slider(container):
+    st.session_state.slider_value_changed = True
+    output_climatebert_prediction(container)
+def output_climatebert_prediction(container):
+    if 'verified_with_climatebert' in st.session_state:
+        with container:
+            for claim, evidences in zip(st.session_state.filtered_input_sentences,
+                                        st.session_state.verified_with_climatebert):
+                show_claim = has_support_or_refute_preds_above_threshold(evidences)
+                if show_claim:
+                    st.markdown(f"### **Claim  :orange[{claim}]**")
+                    for evidence in evidences:
+                        if evidence['label'] != 'NOT_ENOUGH_INFO' and \
+                                evidence['probability'] > st.session_state.prob_slider:
+                            label = evidence['label']
+                            st.write("**Label**: ")
+                            annotated_text((label, "",
+                                            label_highlight_color[label],
+                                            'black'))
+                            st.markdown(f"""**Article title**: {evidence['title']}  
+                                      **Year**: {evidence['year']}  
+                                      **Article link**: {evidence['doi']}  
+                                      **Phrase**: {evidence['text']}  
+                                      **Probability**: {evidence['probability']:.2f}""")
+                    st.markdown("""---""")
+
+
+def has_support_or_refute_preds_above_threshold(evidences):
+    show_claim = False
+    for evidence in evidences:
+        if evidence['label'] != 'NOT_ENOUGH_INFO' and evidence['probability'] > st.session_state.prob_slider:
+            show_claim = True
+    return show_claim
+
+
+def output_multivers_predictions(container):
+    with container:
+        verified_claims = st.session_state.verified_with_multivers
+        for claim_id, claim in verified_claims.items():
+            st.markdown(f"### **Claim  :orange[{claim['claim_text']}]**")
+            for evidence in claim['evidences']:
+                label = evidence['label']
+                st.write("**Label**: ")
+                annotated_text((label, "",
+                                label_highlight_color[label],
+                                'black'))
+                st.markdown(f"""**Article title**: {evidence['evidence_title']}  
+                    **Year**: {evidence['year']}  
+                    **Article link**: {evidence['doi']}""")
+                if evidence['sentences']:
+                    for sent in evidence['sentences_text']:
+                        st.markdown(f"**Phrase**: {sent}")
+                else:
+                    st.markdown(f"**Abstract**: {evidence['evidence_text']}")
             st.markdown("""---""")
-
-
-def output_multivers_predictions(verified_claims):
-    for claim_id, claim in verified_claims.items():
-        st.markdown(f"### **Claim  :orange[{claim['claim_text']}]**")
-        for evidence in claim['evidences']:
-            label = evidence['label']
-            st.write("**Label**: ")
-            annotated_text((label, "",
-                            label_highlight_color[label],
-                            'black'))
-            st.markdown(f"""**Article title**: {evidence['evidence_title']}  
-                **Year**: {evidence['year']}  
-                **Article link**: {evidence['doi']}""")
-            if evidence['sentences']:
-                for sent in evidence['sentences_text']:
-                    st.markdown(f"**Phrase**: {sent}")
-            else:
-                st.markdown(f"**Abstract**: {evidence['evidence_text']}")
-        st.markdown("""---""")
 
 
 if __name__ == "__main__":

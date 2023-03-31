@@ -25,7 +25,7 @@ RUN pip install virtualenv  && \
 RUN python multivers/script/get_checkpoint.py longformer_large_science && \
     python multivers/script/get_checkpoint.py fever_sci && \
     mv checkpoints multivers/
-COPY app/streamlit_app.py ./
+COPY app/streamlit_app.py ./streamlit/
 COPY start.sh ./
 RUN chmod +x start.sh
 ENV EVIDENCE_API_IP=

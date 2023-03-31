@@ -1,0 +1,12 @@
+services:
+  app:
+   build:
+     context: .
+   environment:
+     STREAMLIT_RUN_ON_SAVE: true
+     EVIDENCE_API_IP: 35.204.182.201
+   ports:
+     - 8501:80
+   volumes:
+     - ./app/:/app/streamlit/
+
