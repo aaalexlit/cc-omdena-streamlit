@@ -6,3 +6,8 @@ requests
 streamlit==1.20.0
 st-annotated-text==3.0.0
 nltk
+
+matplotlib
+scipy
+scikit-learn
+tensorboard

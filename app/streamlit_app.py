@@ -5,6 +5,7 @@ import streamlit as st
 from codetiming import Timer
 import requests
 import subprocess
+import pandas as pd
 
 import jsonlines
 from annotated_text import annotated_text
@@ -21,11 +22,15 @@ if 'rand_num' not in st.session_state:
 CLAIMS_FILE = f"claims_{st.session_state.rand_num}.jsonl"
 CORPUS_FILE = f"corpus_{st.session_state.rand_num}.jsonl"
 PREDS_FILE = f"preds_{st.session_state.rand_num}.jsonl"
+GW_STANCE_TEST_PREFIX = f"test_{st.session_state.rand_num}"
+GW_STANCE_PRED_PREFIX = f"pred_{st.session_state.rand_num}"
 
 label_highlight_color = {'CONTRADICT': '#faa',
                          'REFUTES': '#faa',
                          'SUPPORT': '#afa',
                          'SUPPORTS': '#afa'}
+
+label_mapping = {0: 'disagree', 1: 'neutral', 2: 'agree'}
 
 
 @st.cache_resource
@@ -127,6 +132,46 @@ def get_text_from_input(text: str):
     if text.startswith('http'):
         text = get_text_from_url(text)
     return text
+
+
+def predict_gw_stance(input_sentences):
+    sentences = filter_climate_related(input_sentences)
+
+    if not sentences:
+        return None
+    test_filename = f'{GW_STANCE_TEST_PREFIX}.tsv'
+    eval_filename = f'final_model/no-dev/eval_results_{GW_STANCE_TEST_PREFIX}_.txt'
+    preds_filename = f'final_model/no-dev/{GW_STANCE_PRED_PREFIX}_{GW_STANCE_TEST_PREFIX}.tsv'
+    try:
+        df = pd.DataFrame(sentences)
+        df["lab"] = "neutral"
+        df["weight"] = 1.0
+        df.to_csv(test_filename, sep='\t', index=False, header=False)
+
+        cmd = "python GWStance/3_stance_detection/2_Stance_model/predict.py " \
+              "final_model/config.json " \
+              "final_model/no-dev " \
+              f"--input-prefix {GW_STANCE_TEST_PREFIX} " \
+              f"--output-prefix {GW_STANCE_PRED_PREFIX} " \
+              "--data-dir ./ " \
+              "--transformers-dir /opt/bitnami/python/lib/python3.8/site-packages/transformers"
+        subprocess.call(cmd, shell=True, executable='/bin/bash')
+
+        input_df = pd.read_csv(test_filename, sep='\t', header=None, names=["text", "fake1", "fake2"])
+        preds_df = pd.read_csv(preds_filename, sep='\t')
+
+        res_df = input_df.join(preds_df)[["text", "predicted"]]
+
+        res_df['predicted'] = res_df['predicted'].apply(lambda x: label_mapping[x])
+        res_df = res_df.reset_index(drop=True)
+    except:
+        return "some problem encountered during the analysis"
+    finally:
+        Path.unlink(Path(test_filename), missing_ok=True)
+        Path.unlink(Path(eval_filename), missing_ok=True)
+        Path.unlink(Path(preds_filename), missing_ok=True)
+
+    return res_df
 
 
 def predict_with_multivers():
@@ -255,9 +300,9 @@ def main():
     pre_download_used_models()
 
     add_sidebar()
-    tab_bias_detection, tab_faq, tab_how_to = set_header_and_tabs()
+    tab_sci_veri, tab_gw_stance, tab_faq, tab_how_to = set_header_and_tabs()
 
-    with tab_bias_detection:
+    with tab_sci_veri:
         st.text_area("Enter Text or URL of a media article about Climate",
                      placeholder="CO2 is not the cause of our current warming trend",
                      on_change=on_input_text_change,
@@ -339,24 +384,51 @@ def main():
         else:
             climatebert_container.empty()
 
-        # if st.button("Detect Global Warming stance in climate related sentences"):
-        #   with st.spinner(text='Performing stance detection'):
-        #     res = predict_gw_stance(input_sentences, model, tokenizer)
-        #     if res is not None:
-        #       st.dataframe(res, use_container_width=True)
-        #     else:
-        #       st.warning("None of the extracted sentences are climate related.")
+    with tab_gw_stance:
+        st.write("""Enter a Text below and click the Classify Button 
+        to extract Climate Change related  sentences from text and classify them
+        as agreeing with Global warming, disagreeing with Global Warming or neutral""")
 
-        # if st.button("Highlight detected claims"):
-        #   with st.spinner(text='Detecting claims'):
-        #     res = predict_climate_relatedness(input_sentences, model, tokenizer)
-        #     st.dataframe(res, use_container_width=True)
+        text_input = st.text_area("Enter Text")
+        input_sentences = sent_tokenize(text_input)
+
+        # Classify text and show result
+        if st.button("Detect Global Warming stance in climate related sentences"):
+            with st.spinner(text='Performing stance detection'):
+                res = predict_gw_stance(input_sentences)
+                if res is not None:
+                    if isinstance(res, str):
+                        st.error(res)
+                    else:
+                        # CSS to inject contained in a string
+                        hide_table_row_index = """
+                                    <style>
+                                    thead tr th:first-child {display:none}
+                                    tbody th {display:none}
+                                    </style>
+                                    """
+
+                        # Inject CSS with Markdown
+                        st.markdown(hide_table_row_index, unsafe_allow_html=True)
+                        # st.dataframe(res.style, use_container_width=True)
+                        st.table(res.style.applymap(style_agree, props='color:white;background-color:green')
+                                 .applymap(style_disagree, props='color:white;background-color:red'))
+                else:
+                    st.warning("None of the extracted sentences are climate related.")
 
     with tab_how_to:
         st.write("tbd")
 
     with tab_faq:
         st.write("tbd")
+
+
+def style_agree(v, props=''):
+    return props if v in ['agree'] else None
+
+
+def style_disagree(v, props=''):
+    return props if v in ['disagree'] else None
 
 
 def on_filter_state_change(*keys_to_remove):
@@ -367,6 +439,7 @@ def on_filter_state_change(*keys_to_remove):
 
 def on_input_text_change():
     clear_keys('filtered_input_sentences', 'verified_with_climatebert', 'verified_with_multivers')
+    st.session_state.refilter = True
     st.session_state.input_text = get_text_from_input(st.session_state.original_input_text)
     # Check if the text is about climate and then continue
     with st.spinner("Check if the input is Climate related text"):
@@ -393,9 +466,10 @@ def clear_keys(*keys_to_remove):
 
 
 def set_header_and_tabs():
-    st.header("Media article scientific verification")
-    tab_bias_detection, tab_how_to, tab_faq = st.tabs(["Scientific verification", "How-To", "FAQ"])
-    return tab_bias_detection, tab_faq, tab_how_to
+    st.header("Media article scientific verification and Stance Detection")
+    tab_bias_detection, tab_gw_stance, tab_how_to, tab_faq = \
+        st.tabs(["Scientific verification", "Global Warming Stance Detection", "How-To", "FAQ"])
+    return tab_bias_detection, tab_gw_stance, tab_faq, tab_how_to
 
 
 def add_sidebar():
@@ -420,9 +494,12 @@ def show_sentences_to_run_inference_on(container):
             for claim in st.session_state.filtered_input_sentences:
                 st.write(claim)
 
+
 def output_climatebert_prediction_slider(container):
     st.session_state.slider_value_changed = True
     output_climatebert_prediction(container)
+
+
 def output_climatebert_prediction(container):
     if 'verified_with_climatebert' in st.session_state:
         with container:
@@ -473,7 +550,7 @@ def output_multivers_predictions(container):
                     for sent in evidence['sentences_text']:
                         st.markdown(f"**Phrase**: {sent}")
                 else:
-                    st.markdown(f"**Abstract**: {evidence['evidence_text']}")
+                    st.markdown(f"**Abstract**: {' '.join(evidence['evidence_text'])}")
             st.markdown("""---""")
 
 
