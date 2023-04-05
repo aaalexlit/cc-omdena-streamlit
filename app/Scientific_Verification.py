@@ -284,6 +284,8 @@ def get_verified_claims():
                             for sent_num in evidence['sentences']:
                                 sentences_text.append(corpus_line['abstract'][sent_num])
                             evidence['sentences_text'] = sentences_text
+    except:
+        return "Something went wrong while verifying with MultiVerS"
     finally:
         Path.unlink(Path(PREDS_FILE), missing_ok=True)
         Path.unlink(Path(CLAIMS_FILE), missing_ok=True)
@@ -300,16 +302,14 @@ def main():
     pre_download_used_models()
 
     add_sidebar()
-    tab_sci_veri, tab_gw_stance, tab_faq, tab_how_to = set_header_and_tabs()
+    tab_sci_veri, tab_faq, tab_how_to = set_header_and_tabs()
 
     with tab_sci_veri:
         st.text_area("Enter Text or URL of a media article about Climate",
                      placeholder="CO2 is not the cause of our current warming trend",
-                     on_change=on_input_text_change,
-                     key='original_input_text')
+                     key='original_input_text',
+                     on_change=on_input_text_change)
 
-        if 'input_sentences' not in st.session_state:
-            st.stop()
         display_text_to_analyze()
         filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
                                               args=('verified_with_multivers', 'verified_with_climatebert'))
@@ -317,47 +317,47 @@ def main():
         filter_claims_checkbox = st.checkbox('Extract check worthy claims', on_change=on_filter_state_change,
                                              args=('verified_with_multivers', 'verified_with_climatebert'))
 
-        if 'refilter' in st.session_state and st.session_state.refilter:
-            if filter_climate_checkbox:
-                with st.spinner("Filtering climate related sentences"):
-                    st.session_state.filtered_input_sentences = filter_climate_related(
-                        st.session_state.filtered_input_sentences)
-                if not st.session_state.filtered_input_sentences:
-                    st.error("None of the extracted sentences are climate related.")
-                    st.stop()
-            if filter_claims_checkbox:
-                with st.spinner("Detecting claims"):
-                    st.session_state.filtered_input_sentences = filter_claims(st.session_state.filtered_input_sentences)
-                if not st.session_state.filtered_input_sentences:
-                    st.error("No check worthy claims were found in the input ")
-                    st.stop()
-            st.session_state.refilter = False
+        multivers_button = st.button("Verify article text with MultiVerS")
+        climatebert_button = st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER")
 
         # Verify with Multivers
-        if st.button("Verify article text with Multivers"):
-            clear_keys('verified_with_multivers', 'verified_with_climatebert')
-            with st.spinner(text='Retrieving relevant evidences'):
-                convert_evidences_from_abstracts_to_multivers_format()
-            with st.spinner(text='Verifying'):
-                predict_with_multivers()
-            with st.spinner(text='Preparing output'):
-                verified_claims = get_verified_claims()
-                if not verified_claims:
-                    st.warning("According to Multivers model, there's \
-            not enough information to verify any claim from the article")
-                else:
-                    st.session_state.verified_with_multivers = verified_claims
+        if multivers_button:
+            if 'input_sentences' not in st.session_state:
+                st.warning('Enter some text to continue')
+            else:
+                apply_filters(filter_claims_checkbox, filter_climate_checkbox)
+                clear_keys('verified_with_multivers')
+                if 'filtered_input_sentences' in st.session_state:
+                    with st.spinner(text='Retrieving relevant evidences'):
+                        convert_evidences_from_abstracts_to_multivers_format()
+                    with st.spinner(text='Verifying'):
+                        predict_with_multivers()
+                    with st.spinner(text='Preparing output'):
+                        verified_claims = get_verified_claims()
+                        if not verified_claims:
+                            st.warning("According to MultiVerS model, there's \
+                    not enough information to verify any claim from the article")
+                        else:
+                            if isinstance(verified_claims, str):
+                                st.warning(verified_claims)
+                            else:
+                                st.session_state.verified_with_multivers = verified_claims
 
         # Classify text and show result
-        if st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER"):
-            clear_keys('verified_with_multivers', 'verified_with_climatebert', 'slider_value_changed')
-            with st.spinner(text='Verifying the statements'):
-                res = get_verified_against_phrases()
-                if not res:
-                    st.warning("According to the model, there's \
-                                not enough information to verify any claim from the article")
-                else:
-                    st.session_state.verified_with_climatebert = res
+        if climatebert_button:
+            if 'input_sentences' not in st.session_state:
+                st.warning('Enter some text to continue')
+            else:
+                apply_filters(filter_claims_checkbox, filter_climate_checkbox)
+                clear_keys('verified_with_climatebert', 'slider_value_changed')
+                if 'filtered_input_sentences' in st.session_state:
+                    with st.spinner(text='Verifying the statements'):
+                        res = get_verified_against_phrases()
+                        if not res:
+                            st.warning("According to the model, there's \
+                                        not enough information to verify any claim from the article")
+                        else:
+                            st.session_state.verified_with_climatebert = res
 
         multivers_container = st.container()
         if 'verified_with_multivers' in st.session_state:
@@ -371,50 +371,19 @@ def main():
         if 'verified_with_climatebert' in st.session_state:
             climatebert_container.header("ClimateBERT fine-tuned on Climate-FEVER predictions")
             show_sentences_to_run_inference_on(climatebert_container)
-            climatebert_container.slider(label='**Choose probability threshold**',
-                                         min_value=0.0,
-                                         max_value=1.0,
-                                         value=0.5,
-                                         step=0.05,
-                                         key='prob_slider',
-                                         on_change=output_climatebert_prediction_slider,
-                                         args=(climatebert_container,))
+            climatebert_container.slider(
+                label='**Choose probability threshold** that represents the confidence level of predictions',
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.05,
+                key='prob_slider',
+                on_change=output_climatebert_prediction_slider,
+                args=(climatebert_container,))
             if 'slider_value_changed' not in st.session_state:
                 output_climatebert_prediction(climatebert_container)
         else:
             climatebert_container.empty()
-
-    with tab_gw_stance:
-        st.write("""Enter a Text below and click the Classify Button 
-        to extract Climate Change related  sentences from text and classify them
-        as agreeing with Global warming, disagreeing with Global Warming or neutral""")
-
-        text_input = st.text_area("Enter Text")
-        input_sentences = sent_tokenize(text_input)
-
-        # Classify text and show result
-        if st.button("Detect Global Warming stance in climate related sentences"):
-            with st.spinner(text='Performing stance detection'):
-                res = predict_gw_stance(input_sentences)
-                if res is not None:
-                    if isinstance(res, str):
-                        st.error(res)
-                    else:
-                        # CSS to inject contained in a string
-                        hide_table_row_index = """
-                                    <style>
-                                    thead tr th:first-child {display:none}
-                                    tbody th {display:none}
-                                    </style>
-                                    """
-
-                        # Inject CSS with Markdown
-                        st.markdown(hide_table_row_index, unsafe_allow_html=True)
-                        # st.dataframe(res.style, use_container_width=True)
-                        st.table(res.style.applymap(style_agree, props='color:white;background-color:green')
-                                 .applymap(style_disagree, props='color:white;background-color:red'))
-                else:
-                    st.warning("None of the extracted sentences are climate related.")
 
     with tab_how_to:
         st.write("tbd")
@@ -423,18 +392,29 @@ def main():
         st.write("tbd")
 
 
-def style_agree(v, props=''):
-    return props if v in ['agree'] else None
-
-
-def style_disagree(v, props=''):
-    return props if v in ['disagree'] else None
+def apply_filters(filter_claims_checkbox, filter_climate_checkbox):
+    if 'refilter' in st.session_state and st.session_state.refilter:
+        if filter_climate_checkbox:
+            with st.spinner("Filtering climate related sentences"):
+                st.session_state.filtered_input_sentences = filter_climate_related(
+                    st.session_state.filtered_input_sentences)
+            if not st.session_state.filtered_input_sentences:
+                st.error("None of the extracted sentences are climate related.")
+                st.stop()
+        if filter_claims_checkbox:
+            with st.spinner("Detecting claims"):
+                st.session_state.filtered_input_sentences = filter_claims(st.session_state.filtered_input_sentences)
+            if not st.session_state.filtered_input_sentences:
+                st.error("No check worthy claims were found in the input ")
+                st.stop()
+        st.session_state.refilter = False
 
 
 def on_filter_state_change(*keys_to_remove):
     clear_keys(*keys_to_remove)
     st.session_state.refilter = True
-    st.session_state.filtered_input_sentences = st.session_state.input_sentences
+    if 'input_sentences' in st.session_state:
+        st.session_state.filtered_input_sentences = st.session_state.input_sentences
 
 
 def on_input_text_change():
@@ -450,9 +430,7 @@ def on_input_text_change():
 
 
 def display_text_to_analyze():
-    if not len(st.session_state.input_text.strip()):
-        st.stop()
-    if st.session_state.not_climate_related_text:
+    if 'not_climate_related_text' in st.session_state and st.session_state.not_climate_related_text:
         st.warning("Looks like the text you entered doesn't concern the topic of Climate")
     if 'original_input_text' in st.session_state and st.session_state.original_input_text.startswith('http'):
         with st.expander('Text that was extracted from the link and will be analyzed'):
@@ -466,10 +444,10 @@ def clear_keys(*keys_to_remove):
 
 
 def set_header_and_tabs():
-    st.header("Media article scientific verification and Stance Detection")
-    tab_bias_detection, tab_gw_stance, tab_how_to, tab_faq = \
-        st.tabs(["Scientific verification", "Global Warming Stance Detection", "How-To", "FAQ"])
-    return tab_bias_detection, tab_gw_stance, tab_faq, tab_how_to
+    st.header("Media article scientific verification")
+    tab_bias_detection, tab_how_to, tab_faq = \
+        st.tabs(["Scientific verification", "How-To", "FAQ"])
+    return tab_bias_detection, tab_faq, tab_how_to
 
 
 def add_sidebar():
@@ -490,7 +468,7 @@ def pre_download_used_models():
 
 def show_sentences_to_run_inference_on(container):
     with container:
-        with st.expander("Climate related sentences that we'll attempt to verify"):
+        with st.expander("Sentences will be analyzed (the ones that are left after applying the filters)"):
             for claim in st.session_state.filtered_input_sentences:
                 st.write(claim)
 
