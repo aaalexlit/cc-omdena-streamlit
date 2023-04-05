@@ -1,4 +1,4 @@
-FROM bitnami/pytorch:1.13.1
+FROM bitnami/pytorch:1.13.1-debian-11-r34
 USER root
 ENV PIP_NO_CACHE_DIR=1 \
  PIP_DISABLE_PIP_VERSION_CHECK=1
