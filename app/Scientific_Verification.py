@@ -1,5 +1,4 @@
 from newspaper import Article
-from nltk.tokenize import sent_tokenize
 from transformers import AutoTokenizer, pipeline, RobertaForSequenceClassification, AutoModelForSequenceClassification
 import streamlit as st
 from codetiming import Timer
@@ -9,6 +8,7 @@ import pandas as pd
 
 import jsonlines
 from annotated_text import annotated_text
+import spacy
 import nltk
 import torch
 import gc
@@ -34,7 +34,7 @@ label_mapping = {0: 'disagree', 1: 'neutral', 2: 'agree'}
 
 
 @st.cache_resource
-def download_models():
+def download_multivers_models():
     nltk.download('punkt')
     # make multivers download needed model
     predict_with_multivers()
@@ -44,6 +44,13 @@ def download_models():
 def get_climate_sentence_detection_model():
     return RobertaForSequenceClassification.from_pretrained('kruthof/climateattention-10k-upscaled',
                                                             num_labels=2)
+
+
+@st.cache_resource
+def get_spacy_nlp():
+    return spacy.load('en_core_web_sm',
+                      enable=['tok2vec', 'senter'],
+                      config={"nlp": {"disabled": []}})
 
 
 @st.cache_resource
@@ -134,8 +141,11 @@ def get_text_from_input(text: str):
     return text
 
 
-def predict_gw_stance(input_sentences):
-    sentences = filter_climate_related(input_sentences)
+def predict_gw_stance(input_sentences, filter=True):
+    if filter:
+        sentences = filter_climate_related(input_sentences)
+    else:
+        sentences = input_sentences
 
     if not sentences:
         return None
@@ -220,6 +230,13 @@ def get_verified_against_phrases(top_k=10, threshold=0.7):
     return responses
 
 
+def split_into_sentences(text):
+    nlp = get_spacy_nlp()
+    sentences = [sent.text for sent in nlp(text).sents]
+    # replace end of line with space
+    return [' '.join(inp_sent.rsplit('\n')) for inp_sent in sentences]
+
+
 def convert_evidences_from_abstracts_to_multivers_format():
     claims = st.session_state.filtered_input_sentences
     evidence_abstracts = get_abstracts_matching_claims()
@@ -230,10 +247,11 @@ def convert_evidences_from_abstracts_to_multivers_format():
         for claim_id, cur_evidences in enumerate(evidence_abstracts):
             doc_ids = []
             for i, cur_evidence in enumerate(cur_evidences):
+                sentences = split_into_sentences(cur_evidence["text"])
                 evidence_abstract = {
                     'doc_id': doc_id,
                     'title': cur_evidence["title"],
-                    'abstract': sent_tokenize(cur_evidence["text"]),
+                    'abstract': sentences,
                     'doi': cur_evidence["doi"],
                     'year': cur_evidence["year"]
                 }
@@ -305,10 +323,15 @@ def main():
     tab_sci_veri, tab_faq, tab_how_to = set_header_and_tabs()
 
     with tab_sci_veri:
+        if 'input_text' in st.session_state:
+            init_value = st.session_state.input_text
+        else:
+            init_value = ''
         st.text_area("Enter Text or URL of a media article about Climate",
                      placeholder="CO2 is not the cause of our current warming trend",
                      key='original_input_text',
-                     on_change=on_input_text_change)
+                     on_change=on_input_text_change,
+                     value=init_value)
 
         display_text_to_analyze()
         filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
@@ -425,7 +448,7 @@ def on_input_text_change():
     with st.spinner("Check if the input is Climate related text"):
         st.session_state.not_climate_related_text = len(st.session_state.input_text.strip()) and \
                                                     not filter_climate_related([st.session_state.input_text])
-    st.session_state.input_sentences = sent_tokenize(st.session_state.input_text)
+    st.session_state.input_sentences = split_into_sentences(st.session_state.input_text)
     st.session_state.filtered_input_sentences = st.session_state.input_sentences
 
 
@@ -461,9 +484,12 @@ def add_sidebar():
 
 
 def pre_download_used_models():
-    download_models()
+    download_multivers_models()
     get_climatebert_tokenizer()
     get_climate_sentence_detection_model()
+    get_spacy_nlp()
+    get_claimbuster_model()
+    get_claimbuster_tokenizer()
 
 
 def show_sentences_to_run_inference_on(container):
@@ -471,6 +497,7 @@ def show_sentences_to_run_inference_on(container):
         with st.expander("Sentences will be analyzed (the ones that are left after applying the filters)"):
             for claim in st.session_state.filtered_input_sentences:
                 st.write(claim)
+                st.write('---')
 
 
 def output_climatebert_prediction_slider(container):

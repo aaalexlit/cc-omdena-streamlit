@@ -29,6 +29,7 @@ RUN python multivers/script/get_checkpoint.py longformer_large_science && \
     python multivers/script/get_checkpoint.py fever_sci && \
     mv checkpoints multivers/
 RUN cp -r GWStance/3_stance_detection/2_Stance_model/for_transformers/* /opt/bitnami/python/lib/python3.8/site-packages/transformers/
+RUN python -m spacy download en_core_web_sm
 COPY app/ ./streamlit/
 COPY start.sh ./
 RUN chmod +x start.sh

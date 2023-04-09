@@ -1,5 +1,4 @@
 import streamlit as st
-from nltk.tokenize import sent_tokenize
 import sys
 
 sys.path.append("..")
@@ -21,12 +20,13 @@ def main():
         as agreeing with Global warming, disagreeing with Global Warming or neutral""",
                                   value=init_value)
 
-        input_sentences = sent_tokenize(text_input)
+        input_sentences = main_page.split_into_sentences(text_input)
 
+        st.checkbox('Filter climate related sentences', key='filter_gw', value=True)
         # Classify text and show result
         if st.button("Detect Global Warming stance in climate related sentences"):
             with st.spinner(text='Performing stance detection'):
-                res = main_page.predict_gw_stance(input_sentences)
+                res = main_page.predict_gw_stance(input_sentences, st.session_state.filter_gw)
                 if res is not None:
                     if isinstance(res, str):
                         st.error(res)
