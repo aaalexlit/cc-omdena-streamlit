@@ -195,39 +195,36 @@ def predict_with_multivers():
 
 
 @Timer(text="get_abstracts_matching_claims elapsed time: {seconds:.0f} s")
-def get_abstracts_matching_claims(top_k=10, threshold=0.7):
-    claims = st.session_state.filtered_input_sentences
-    api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/abstract/evidence"
+def get_abstracts_matching_claims(threshold=0.6):
+    api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/abstract/evidence/batch"
 
-    responses = []
-
-    for claim in claims:
-        request_body = {
-            "claim": claim,
-            "threshold": threshold,
-            "top_k": top_k
-        }
-        response = requests.post(api_url, json=request_body)
-        responses.append(response.json())
-    return responses
+    request_body = get_request_body(threshold)
+    params = {'re_rank': st.session_state.re_rank if 're_rank' in st.session_state else True}
+    response = requests.post(api_url, json=request_body, params=params)
+    return response.json()
 
 
 @Timer(text="get_verified_against_phrases elapsed time: {seconds:.0f} s")
-def get_verified_against_phrases(top_k=10, threshold=0.7):
-    claims = st.session_state.filtered_input_sentences
-    api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/phrase/verify"
+def get_verified_against_phrases(threshold=0.7):
+    path = 'phrase'
+    if 'retrieve_abstracts' in st.session_state and st.session_state.retrieve_abstracts:
+        path = 'abstract'
 
-    responses = []
+    api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/{path}/verify/batch"
+    request_body = get_request_body(threshold)
+    params = {'re_rank': st.session_state.re_rank if 're_rank' in st.session_state else True,
+              'include_title': st.session_state.include_title if 'include_title' in st.session_state else True}
+    response = requests.post(api_url, json=request_body, params=params)
+    return response.json()
 
-    for claim in claims:
-        request_body = {
-            "claim": claim,
-            "threshold": threshold,
-            "top_k": top_k
-        }
-        response = requests.post(api_url, json=request_body)
-        responses.append(response.json())
-    return responses
+
+def get_request_body(threshold):
+    request_body = {
+        "claims": st.session_state.filtered_input_sentences,
+        "threshold": st.session_state.similarity_threshold if 'similarity_threshold' in st.session_state else threshold,
+        "top_k": st.session_state.top_k if 'top_k' in st.session_state else 10
+    }
+    return request_body
 
 
 def split_into_sentences(text):
@@ -253,7 +250,9 @@ def convert_evidences_from_abstracts_to_multivers_format():
                     'title': cur_evidence["title"],
                     'abstract': sentences,
                     'doi': cur_evidence["doi"],
-                    'year': cur_evidence["year"]
+                    'year': cur_evidence["year"],
+                    'citation_count': cur_evidence["citation_count"],
+                    'influential_citation_count': cur_evidence["influential_citation_count"]
                 }
                 corpus_writer.write(evidence_abstract)
                 doc_ids.append(doc_id)
@@ -298,6 +297,8 @@ def get_verified_claims():
                             evidence['evidence_text'] = corpus_line['abstract']
                             evidence['doi'] = corpus_line['doi']
                             evidence['year'] = corpus_line['year']
+                            evidence['citation_count'] = corpus_line['citation_count']
+                            evidence['influential_citation_count'] = corpus_line['influential_citation_count']
                             sentences_text = []
                             for sent_num in evidence['sentences']:
                                 sentences_text.append(corpus_line['abstract'][sent_num])
@@ -334,11 +335,16 @@ def main():
                      value=init_value)
 
         display_text_to_analyze()
-        filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
-                                              args=('verified_with_multivers', 'verified_with_climatebert'))
+        options_col_left, options_col_right = st.columns(2)
+        with options_col_left:
+            filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
+                                                  args=('verified_with_multivers', 'verified_with_climatebert'))
 
-        filter_claims_checkbox = st.checkbox('Extract check worthy claims', on_change=on_filter_state_change,
-                                             args=('verified_with_multivers', 'verified_with_climatebert'))
+            filter_claims_checkbox = st.checkbox('Extract check worthy claims', on_change=on_filter_state_change,
+                                                 args=('verified_with_multivers', 'verified_with_climatebert'))
+        with options_col_right:
+            with st.expander("Advanced options"):
+                add_advanced_options()
 
         multivers_button = st.button("Verify article text with MultiVerS")
         climatebert_button = st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER")
@@ -394,7 +400,7 @@ def main():
         if 'verified_with_climatebert' in st.session_state:
             climatebert_container.header("ClimateBERT fine-tuned on Climate-FEVER predictions")
             show_sentences_to_run_inference_on(climatebert_container)
-            climatebert_container.slider(
+            climatebert_container.columns(4)[0].slider(
                 label='**Choose probability threshold** that represents the confidence level of predictions',
                 min_value=0.0,
                 max_value=1.0,
@@ -413,6 +419,34 @@ def main():
 
     with tab_faq:
         st.write("tbd")
+
+
+def add_advanced_options():
+    st.checkbox('Re-rank evidences',
+                key='re_rank',
+                value=True)
+    cols = st.columns(5)
+    with cols[0]:
+        st.number_input('Top evidence number to retrieve',
+                        min_value=10,
+                        max_value=30,
+                        value=10,
+                        step=5,
+                        key='top_k')
+        st.number_input('Evidence similarity threshold',
+                        min_value=0.5,
+                        max_value=0.9,
+                        value=0.7,
+                        step=0.1,
+                        key='similarity_threshold')
+    st.write('---')
+    st.write('ClimateBERT-based model options')
+    st.checkbox('Include title during verification',
+                key='include_title',
+                value=True)
+    st.checkbox('Retrieve evidence abstracts',
+                key='retrieve_abstracts',
+                value=False)
 
 
 def apply_filters(filter_claims_checkbox, filter_climate_checkbox):
@@ -479,7 +513,11 @@ def add_sidebar():
     project_link = '[Project Description](https://omdena.com/chapter-challenges/detecting-bias-in-climate-reporting' \
                    '-in-english-and-german-language-news-media/)'
     st.sidebar.markdown(project_link, unsafe_allow_html=True)
-    github_link = '[Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
+    st.sidebar.markdown('[This App Github Repo](https://github.com/aaalexlit/cc-omdena-streamlit/)',
+                        unsafe_allow_html=True)
+    st.sidebar.markdown('[Evidence Retrieval API Github Repo](https://github.com/aaalexlit/cc-evidences-api/)',
+                        unsafe_allow_html=True)
+    github_link = '[Omdena Github Repo](https://github.com/OmdenaAI/cologne-germany-reporting-bias/)'
     st.sidebar.markdown(github_link, unsafe_allow_html=True)
 
 
@@ -494,10 +532,18 @@ def pre_download_used_models():
 
 def show_sentences_to_run_inference_on(container):
     with container:
-        with st.expander("Sentences will be analyzed (the ones that are left after applying the filters)"):
-            for claim in st.session_state.filtered_input_sentences:
-                st.write(claim)
-                st.write('---')
+        with st.expander("Sentences that will be analyzed (the ones that are left after applying the filters)"):
+            # CSS to inject contained in a string
+            hide_table_row_index = """
+                        <style>
+                        thead tr th:first-child {display:none}
+                        tbody th {display:none}
+                        </style>
+                        """
+
+            # Inject CSS with Markdown
+            st.markdown(hide_table_row_index, unsafe_allow_html=True)
+            st.table(pd.DataFrame(st.session_state.filtered_input_sentences, columns=['sentence']))
 
 
 def output_climatebert_prediction_slider(container):
@@ -517,14 +563,15 @@ def output_climatebert_prediction(container):
                         if evidence['label'] != 'NOT_ENOUGH_INFO' and \
                                 evidence['probability'] > st.session_state.prob_slider:
                             label = evidence['label']
-                            st.write("**Label**: ")
                             annotated_text((label, "",
                                             label_highlight_color[label],
                                             'black'))
                             st.markdown(f"""**Article title**: {evidence['title']}  
                                       **Year**: {evidence['year']}  
-                                      **Article link**: {evidence['doi']}  
+                                      **Article link**: https://www.doi.org/{evidence['doi']}  
                                       **Phrase**: {evidence['text']}  
+                                      **Influential citation count**: {evidence['influential_citation_count']}  
+                                      **Citation count**: {evidence['citation_count']}  
                                       **Probability**: {evidence['probability']:.2f}""")
                     st.markdown("""---""")
 
@@ -544,13 +591,14 @@ def output_multivers_predictions(container):
             st.markdown(f"### **Claim  :orange[{claim['claim_text']}]**")
             for evidence in claim['evidences']:
                 label = evidence['label']
-                st.write("**Label**: ")
                 annotated_text((label, "",
                                 label_highlight_color[label],
                                 'black'))
                 st.markdown(f"""**Article title**: {evidence['evidence_title']}  
                     **Year**: {evidence['year']}  
-                    **Article link**: {evidence['doi']}""")
+                    **Article link**: https://www.doi.org/{evidence['doi']}  
+                    **Influential citation count**: {evidence['influential_citation_count']}  
+                    **Citation count**: {evidence['citation_count']}""")
                 if evidence['sentences']:
                     for sent in evidence['sentences_text']:
                         st.markdown(f"**Phrase**: {sent}")
