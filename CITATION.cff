@@ -1,0 +1,20 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: >-
+  News articles Scientific verification and Global warming
+  stance detection
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - orcid: 'https://orcid.org/0009-0001-9850-0307'
+    email: aaalex.lit@gmail.com
+    given-names: Alex
+    family-names: Litvinov
+repository-code: 'https://github.com/aaalexlit/cc-omdena-streamlit'
+repository-artifact: >-
+  https://hub.docker.com/repository/docker/aaalexlit/cc-omdena-streamlit/
+license: MIT
