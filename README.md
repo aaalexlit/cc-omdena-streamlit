@@ -111,6 +111,10 @@ ClimaText dataset [[2]](#references) and is
 [recommended by the model authors](https://huggingface.co/kruthof/climateattention-ctw)
 for company disclosures or news article analysis
 
+### Claim detection
+[ClaimBuster-DeBERTaV2 model](https://huggingface.co/whispAI/ClaimBuster-DeBERTaV2)
+from huggingface is used to classify a sentence as claim/not claim.
+
 
 ## Discussion and next steps
 Please refer to the [Discussion](doc/discussion.md)

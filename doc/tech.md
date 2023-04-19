@@ -27,6 +27,11 @@ Build
 docker build -t aaalexlit/cc-omdena-streamlit .
 ```
 
+Run
+```shell
+docker run -d --name cc-omdena-streamlit -p 8501:80 -e EVIDENCE_API_IP=35.204.71.90 aaalexlit/cc-omdena-streamlit
+```
+
 Push
 ```bash
 docker tag aaalexlit/cc-omdena-streamlit:latest aaalexlit/cc-omdena-streamlit:0.0.x
