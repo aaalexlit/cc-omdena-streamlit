@@ -44,3 +44,8 @@ scientific articles abstracts by passing all the available
 from semanticscholar relevancy search described in this 
 [blog article](https://blog.allenai.org/building-a-better-search-engine-for-semantic-scholar-ea23a0b661e7) 
 and available in [github](https://github.com/allenai/s2search)
+4. Verify non-scientific factual claims (eg environmental claims from firms and corporations). 
+For that environmental claims
+[dataset](https://huggingface.co/datasets/climatebert/environmental_claims) 
+and [model](https://huggingface.co/climatebert/environmental-claims)
+from ClimateBERT creators can be extremely useful
