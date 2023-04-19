@@ -1,6 +1,7 @@
 from newspaper import Article
 from transformers import AutoTokenizer, pipeline, RobertaForSequenceClassification, AutoModelForSequenceClassification
 import streamlit as st
+import streamlit.components.v1 as components
 from codetiming import Timer
 import requests
 import subprocess
@@ -8,6 +9,7 @@ import pandas as pd
 
 import jsonlines
 from annotated_text import annotated_text
+from fastcoref import spacy_component
 import spacy
 import nltk
 import torch
@@ -15,6 +17,8 @@ import gc
 import os
 import time
 from pathlib import Path
+import re
+from itertools import zip_longest
 
 if 'rand_num' not in st.session_state:
     st.session_state.rand_num = int(time.time() * 1000)
@@ -51,6 +55,14 @@ def get_spacy_nlp():
     return spacy.load('en_core_web_sm',
                       enable=['tok2vec', 'senter'],
                       config={"nlp": {"disabled": []}})
+
+
+@st.cache_resource
+def get_spacy_coref():
+    nlp = spacy.load('en_core_web_sm',
+                     exclude=["parser", "lemmatizer", "ner", "textcat"])
+    nlp.add_pipe("fastcoref")
+    return nlp
 
 
 @st.cache_resource
@@ -415,17 +427,52 @@ def main():
             climatebert_container.empty()
 
     with tab_how_to:
-        st.write("tbd")
+        fill_tab('https://raw.githubusercontent.com/aaalexlit/cc-omdena-streamlit/main/README.md')
 
     with tab_faq:
-        st.write("tbd")
+        url = 'https://raw.githubusercontent.com/aaalexlit/cc-evidences-api/main/doc/db.md'
+        fill_tab(url)
+
+
+def mermaid(code: str) -> None:
+    components.html(
+        f"""
+        <script type="module">
+            import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.mjs';
+            mermaid.initialize({{ startOnLoad: true }});
+        </script>
+        
+        <pre class="mermaid">
+            {code}
+        </pre>
+
+        """,
+        height=700,
+        scrolling=True
+    )
+
+
+def fill_tab(url):
+    page = requests.get(url)
+    pattern = re.compile(r'```mermaid.*?```', flags=re.DOTALL)
+    mermaids = pattern.findall(page.text)
+    texts = pattern.split(page.text)
+    for t, m in zip_longest(texts, mermaids, fillvalue=''):
+        st.write(t)
+        if m != '':
+            m = m.replace('```mermaid', ' ')
+            m = m.replace('```', ' ')
+            mermaid(m)
 
 
 def add_advanced_options():
     st.checkbox('Re-rank evidences',
                 key='re_rank',
                 value=True)
-    cols = st.columns(5)
+    st.checkbox('Co-reference resolution of the input text',
+                key='coref_source',
+                value=False)
+    cols = st.columns(4)
     with cols[0]:
         st.number_input('Top evidence number to retrieve',
                         min_value=10,
@@ -450,6 +497,12 @@ def add_advanced_options():
 
 
 def apply_filters(filter_claims_checkbox, filter_climate_checkbox):
+    if 'coref_source' in st.session_state and st.session_state.coref_source:
+        with st.spinner("Resolving co-references"):
+            coref_resolved = coref_resolve(st.session_state.input_text)
+            st.session_state.input_sentences = split_into_sentences(coref_resolved)
+            st.session_state.filtered_input_sentences = st.session_state.input_sentences
+
     if 'refilter' in st.session_state and st.session_state.refilter:
         if filter_climate_checkbox:
             with st.spinner("Filtering climate related sentences"):
@@ -486,6 +539,12 @@ def on_input_text_change():
     st.session_state.filtered_input_sentences = st.session_state.input_sentences
 
 
+def coref_resolve(text: str) -> str:
+    coref_resolver = get_spacy_coref()
+    doc = coref_resolver(text, component_cfg={"fastcoref": {'resolve_text': True}})
+    return doc._.resolved_text
+
+
 def display_text_to_analyze():
     if 'not_climate_related_text' in st.session_state and st.session_state.not_climate_related_text:
         st.warning("Looks like the text you entered doesn't concern the topic of Climate")
@@ -503,7 +562,7 @@ def clear_keys(*keys_to_remove):
 def set_header_and_tabs():
     st.header("Media article scientific verification")
     tab_bias_detection, tab_how_to, tab_faq = \
-        st.tabs(["Scientific verification", "How-To", "FAQ"])
+        st.tabs(["Scientific verification", "Main Readme", "Evidences DB"])
     return tab_bias_detection, tab_faq, tab_how_to
 
 
@@ -526,6 +585,7 @@ def pre_download_used_models():
     get_climatebert_tokenizer()
     get_climate_sentence_detection_model()
     get_spacy_nlp()
+    get_spacy_coref()
     get_claimbuster_model()
     get_claimbuster_tokenizer()
 

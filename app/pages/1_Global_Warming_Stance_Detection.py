@@ -7,7 +7,7 @@ import Scientific_Verification as main_page
 
 def main():
     main_page.add_sidebar()
-    main_tab, tab_faq, tab_how_to = set_header_and_tabs()
+    main_tab, tab_readme = set_header_and_tabs()
 
     with main_tab:
         if 'input_text' in st.session_state:
@@ -57,9 +57,9 @@ def style_disagree(v, props=''):
 
 def set_header_and_tabs():
     st.header("Media article Global Warming Stance detection")
-    tab_bias_detection, tab_how_to, tab_faq = \
-        st.tabs(["Global Warming Stance detection", "How-To", "FAQ"])
-    return tab_bias_detection, tab_faq, tab_how_to
+    tab_bias_detection, tab_readme = \
+        st.tabs(["Global Warming Stance detection", "Readme"])
+    return tab_bias_detection, tab_readme
 
 
 if __name__ == "__main__":

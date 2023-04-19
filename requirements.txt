@@ -12,3 +12,4 @@ scipy==1.10.1
 scikit-learn==1.2.2
 tensorboard==2.12.1
 spacy==3.5.1
+fastcoref==2.1.1
