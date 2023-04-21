@@ -28,12 +28,43 @@ sentences
 Using co-reference resolution on the original media article text.
 We tried doing it manually and came to a conclusion
 
-## Predictions quality
-- Heavily depends on the input claims quality discussed above
-- The absense of proper dataset
-- Fine-tuning MultiVerS model on Climate-FEVER
+## Predictions quality and Further improvements
 
-## Ideas to implement
+There are plenty of things to improve, current work just barely 
+touched the surface.
+
+
+- Heavily depends on the input claims quality as discussed above
+- The absense of proper dataset. Climate-FEVER's source is Wikipedia 
+which differs from both media articles and scientific abstracts hence
+not exactly in the domain of out interest
+- MultiVerS model that we're using is pretrained on out-of-domain data(FEVER)
+and weakly-labeled partly-in-domain data (in a sense that in spite of being 
+scientific articles, they are biomedical rather than environment-related) - 
+PubMedQA + Evidence Inference.
+
+### Fine-tune MultiVerS model on CLIMATE-FEVER dataset
+For that CLIMATE-FEVER needs to be transformed into MultiVerS 
+input format.
+
+### Combine predictions of the 2 used models in different ways
+1. Take as positive only those articles where both models 
+agreed on the label 
+2. Pass to the ClimateBERT-based model only phrases from articles
+that were labeled by MultiVerS model as SUPPORTS or REFUTES
+
+### Create in-domain (claims from news vs scientific abstracts) dataset
+
+Potential approaches:
+
+1. Using this tool and model's predictions as a base for expert review
+2. Manually from extracting from [https://climatefeedback.org/](https://climatefeedback.org/)'s
+reviews 
+
+The advantage of the latter is that less expertise is required from the annotators
+because the reviews are already made by climate specialists
+
+## Other ideas to implement
 
 1. It would be interesting to see the percentage of the articles from 
 the full corpus that gets retrieved by the searches.
