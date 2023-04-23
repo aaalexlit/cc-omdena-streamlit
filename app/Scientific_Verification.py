@@ -347,6 +347,7 @@ def main():
                      value=init_value)
 
         display_text_to_analyze()
+        st.subheader("Options")
         options_col_left, options_col_right = st.columns(2)
         with options_col_left:
             filter_climate_checkbox = st.checkbox('Filter climate related sentences', on_change=on_filter_state_change,
@@ -357,12 +358,18 @@ def main():
         with options_col_right:
             with st.expander("Advanced options"):
                 add_advanced_options()
+        st.write("---")
+        st.subheader("Verification model")
 
-        multivers_button = st.button("Verify article text with MultiVerS")
-        climatebert_button = st.button("Verify article text with ClimateBERT fine-tuned on Climate-FEVER")
+        st.radio("Verification model",
+                 ('ClimateBERT fine-tuned on Climate-FEVER', 'MultiVerS'),
+                 key='model',
+                 index=0)
+        verify_button = st.button('Verify')
 
+        st.write("---")
         # Verify with Multivers
-        if multivers_button:
+        if verify_button and st.session_state.model == 'MultiVerS':
             if 'input_sentences' not in st.session_state:
                 st.warning('Enter some text to continue')
             else:
@@ -385,7 +392,7 @@ def main():
                                 st.session_state.verified_with_multivers = verified_claims
 
         # Classify text and show result
-        if climatebert_button:
+        if verify_button and st.session_state.model != 'MultiVerS':
             if 'input_sentences' not in st.session_state:
                 st.warning('Enter some text to continue')
             else:
@@ -472,7 +479,7 @@ def add_advanced_options():
     st.checkbox('Co-reference resolution of the input text',
                 key='coref_source',
                 value=False)
-    cols = st.columns(4)
+    cols = st.columns(2)
     with cols[0]:
         st.number_input('Top evidence number to retrieve',
                         min_value=10,
@@ -497,11 +504,14 @@ def add_advanced_options():
 
 
 def apply_filters(filter_claims_checkbox, filter_climate_checkbox):
-    if 'coref_source' in st.session_state and st.session_state.coref_source:
-        with st.spinner("Resolving co-references"):
-            coref_resolved = coref_resolve(st.session_state.input_text)
-            st.session_state.input_sentences = split_into_sentences(coref_resolved)
-            st.session_state.filtered_input_sentences = st.session_state.input_sentences
+    if 'coref_source' in st.session_state:
+        if st.session_state.coref_source:
+            with st.spinner("Resolving co-references"):
+                coref_resolved = coref_resolve(st.session_state.input_text)
+                st.session_state.input_sentences = split_into_sentences(coref_resolved)
+        else:
+            st.session_state.input_sentences = split_into_sentences(st.session_state.input_text)
+        st.session_state.filtered_input_sentences = st.session_state.input_sentences
 
     if 'refilter' in st.session_state and st.session_state.refilter:
         if filter_climate_checkbox:
@@ -619,20 +629,20 @@ def output_climatebert_prediction(container):
                 show_claim = has_support_or_refute_preds_above_threshold(evidences)
                 if show_claim:
                     st.markdown(f"### **Claim  :orange[{claim}]**")
+                    evidences.sort(key=lambda ev: ev['probability'], reverse=True)
                     for evidence in evidences:
                         if evidence['label'] != 'NOT_ENOUGH_INFO' and \
                                 evidence['probability'] > st.session_state.prob_slider:
                             label = evidence['label']
-                            annotated_text((label, "",
+                            annotated_text((label, f"{evidence['probability']:.2f}",
                                             label_highlight_color[label],
                                             'black'))
-                            st.markdown(f"""**Article title**: {evidence['title']}  
-                                      **Year**: {evidence['year']}  
-                                      **Article link**: https://www.doi.org/{evidence['doi']}  
-                                      **Phrase**: {evidence['text']}  
-                                      **Influential citation count**: {evidence['influential_citation_count']}  
-                                      **Citation count**: {evidence['citation_count']}  
-                                      **Probability**: {evidence['probability']:.2f}""")
+                            st.markdown(f"""**Article title (Year)**: 
+                            [{evidence['title']}](https://www.doi.org/{evidence['doi']}) ({evidence['year']})  
+                                      **Rationale**: {evidence['text']}  
+                                      **Citation count (Influential)**: {evidence['citation_count']} 
+                                      ({evidence['influential_citation_count']}) 
+                                      """)
                     st.markdown("""---""")
 
 
@@ -654,16 +664,16 @@ def output_multivers_predictions(container):
                 annotated_text((label, "",
                                 label_highlight_color[label],
                                 'black'))
-                st.markdown(f"""**Article title**: {evidence['evidence_title']}  
-                    **Year**: {evidence['year']}  
-                    **Article link**: https://www.doi.org/{evidence['doi']}  
-                    **Influential citation count**: {evidence['influential_citation_count']}  
-                    **Citation count**: {evidence['citation_count']}""")
+                st.markdown(f"""**Article title (Year)**: 
+                            [{evidence['title']}](https://www.doi.org/{evidence['doi']}) ({evidence['year']})""")
                 if evidence['sentences']:
                     for sent in evidence['sentences_text']:
-                        st.markdown(f"**Phrase**: {sent}")
+                        st.markdown(f"**Rationale**: {sent}")
                 else:
                     st.markdown(f"**Abstract**: {' '.join(evidence['evidence_text'])}")
+                st.markdown(f"""**Citation count (Influential)**: {evidence['citation_count']} 
+                                      ({evidence['influential_citation_count']}) 
+                                      """)
             st.markdown("""---""")
 
 
