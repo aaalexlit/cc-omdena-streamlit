@@ -2,31 +2,48 @@
 
 ## Claim detection
 **_Problem_**  
-Media articles feature lots of compound claims ie containing several
+Both media articles and scientific paper abstracts 
+feature lots of compound claims ie containing several
 statements in one sentence. 
 It "confuses" the verification models that are trained on atomic claims.
 
-**_Example_**
-> tbd
+***Example of a composite claim from scientific paper abstract***
+> Our analysis suggests that the early twentieth century warming can best 
+> be explained by a combination of warming due to increases 
+> in greenhouse gases and natural forcing, some cooling due to 
+> other anthropogenic forcings, and a substantial, but not implausible, 
+> contribution from internal variability.
+> 
+That's predicted to support atomic claim `Natural variation explains a substantial 
+part of global warming observed since 1850`
+
+***Example of a composite claim from  media articles***
+> While a warming globe might eventually be the dominant cause of Greenland’s 
+> shrinking ice, natural cycles in temperatures and currents in the North Atlantic 
+> that extend for decades have been a much more important influence since 1900.
 > 
 
-**_Potential solution_**  
+Which is predicted to be supported by `The Arctic featured the strongest surface 
+warming over the globe during the recent decades, and the temperature increase 
+was accompanied by a rapid decline in sea ice extent.`
+
+***Potential solution***  
 Create a dataset of atomic scientifically verifiable claims 
 and train a model to locate the bounds of such claims in the full text
 rather that splitting the text first and then classifying a sentence as 
 claim - not claim.
 ---
-**_Problem_**  
+***Problem***  
 Context is getting lost when the media article text is split into individual 
 sentences
 
-**_Example_**
+***Example***
 > tbd
 >
 
-**_Potential solution_**  
-Using co-reference resolution on the original media article text.
-We tried doing it manually and came to a conclusion
+***Potential solution***  
+Using co-reference resolution on the original media article text 
+as well as the indexed scientific paper abstracts
 
 ## Predictions quality and Further improvements
 

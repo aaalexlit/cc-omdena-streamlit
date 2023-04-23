@@ -112,9 +112,29 @@ ClimaText dataset [[2]](#references) and is
 for company disclosures or news article analysis
 
 ### Claim detection
+
+:x: First we attempted to use ClimateBERT-based model fine-tuned on ["ClimateBERT Text 
+classification dataset"](https://huggingface.co/datasets/climatebert/environmental_claims) 
+[[1]](#references) referred to as 
+[environmental-claims model](https://huggingface.co/climatebert/environmental-claims) 
+available from huggingface
+
+nature of the dataset doesn't seem to work well for 
+our general purpose (ie working with media articles on the internet) since
+it represents 
+> sentences extracted from corporate annual reports, sustainability 
+> reports and earning calls transcripts
+
+:white_check_mark: We end up using 
 [ClaimBuster-DeBERTaV2 model](https://huggingface.co/whispAI/ClaimBuster-DeBERTaV2)
 from huggingface is used to classify a sentence as claim/not claim.
+It's a classifier trained on [ClaimBuster dataset](https://zenodo.org/record/3609356#.ZEVK4OxBxhG)
+that predicts a phrase to be one of:
+- Non-Factual Statement (NFS)
+- Unimportant Factual Statement (UFS)
+- Check-worthy Factual Statement (CFS)
 
+The performance is far from ideal for the reasons described [here](doc/discussion.md#claim-detection)
 
 ## Discussion and next steps
 Please refer to the [Discussion](doc/discussion.md)
