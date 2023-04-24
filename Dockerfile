@@ -26,7 +26,8 @@ RUN pip install virtualenv  && \
 RUN gdown https://drive.google.com/uc?id=12rVg_bpuDfZbdWRtEN2Jf6SNyMEnax76 && \
     tar -xvzf final_model.tar.gz
 RUN python multivers/script/get_checkpoint.py longformer_large_science && \
-    python multivers/script/get_checkpoint.py fever_sci && \
+    # pretend that we're giving it fever_sci checkpoint not to change the code but in fact it's the fine-tuned on CLIMATE-FEVER one
+    wget -O "checkpoints/fever_sci.ckpt" https://storage.googleapis.com/cc-evidences-data/multivers_checkpoints/covidfact/checkpoint/epoch%3D1-step%3D879.ckpt && \
     mv checkpoints multivers/
 RUN cp -r GWStance/3_stance_detection/2_Stance_model/for_transformers/* /opt/bitnami/python/lib/python3.8/site-packages/transformers/
 RUN python -m spacy download en_core_web_sm
