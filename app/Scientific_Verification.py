@@ -31,6 +31,7 @@ GW_STANCE_PRED_PREFIX = f"pred_{st.session_state.rand_num}"
 
 label_highlight_color = {'CONTRADICT': '#faa',
                          'REFUTES': '#faa',
+                         'NOT_ENOUGH_INFO': '#808080',
                          'SUPPORT': '#afa',
                          'SUPPORTS': '#afa'}
 
@@ -225,7 +226,8 @@ def get_verified_against_phrases(threshold=0.7):
     api_url = f"http://{os.getenv('EVIDENCE_API_IP')}/api/{path}/verify/batch"
     request_body = get_request_body(threshold)
     params = {'re_rank': st.session_state.re_rank if 're_rank' in st.session_state else True,
-              'include_title': st.session_state.include_title if 'include_title' in st.session_state else True}
+              'include_title': st.session_state.include_title if 'include_title' in st.session_state else True,
+              'filter_nei': (not st.session_state.show_nei) if 'show_nei' in st.session_state else True}
     response = requests.post(api_url, json=request_body, params=params)
     return response.json()
 
@@ -501,6 +503,9 @@ def add_advanced_options():
     st.checkbox('Retrieve evidence abstracts',
                 key='retrieve_abstracts',
                 value=False)
+    st.checkbox('Show NEI',
+                key='show_nei',
+                value=False)
 
 
 def apply_filters(filter_claims_checkbox, filter_climate_checkbox):
@@ -626,12 +631,13 @@ def output_climatebert_prediction(container):
         with container:
             for claim, evidences in zip(st.session_state.filtered_input_sentences,
                                         st.session_state.verified_with_climatebert):
-                show_claim = has_support_or_refute_preds_above_threshold(evidences)
+                show_claim = st.session_state.show_nei or has_support_or_refute_preds_above_threshold(evidences)
                 if show_claim:
                     st.markdown(f"### **Claim  :orange[{claim}]**")
                     evidences.sort(key=lambda ev: ev['probability'], reverse=True)
                     for evidence in evidences:
-                        if evidence['label'] != 'NOT_ENOUGH_INFO' and \
+                        if (((st.session_state.show_nei and evidence['label'] == 'NOT_ENOUGH_INFO') or
+                            evidence['label'] != 'NOT_ENOUGH_INFO')) and \
                                 evidence['probability'] > st.session_state.prob_slider:
                             label = evidence['label']
                             annotated_text((label, f"{evidence['probability']:.2f}",
@@ -665,7 +671,7 @@ def output_multivers_predictions(container):
                                 label_highlight_color[label],
                                 'black'))
                 st.markdown(f"""**Article title (Year)**: 
-                            [{evidence['title']}](https://www.doi.org/{evidence['doi']}) ({evidence['year']})""")
+                            [{evidence['evidence_title']}](https://www.doi.org/{evidence['doi']}) ({evidence['year']})""")
                 if evidence['sentences']:
                     for sent in evidence['sentences_text']:
                         st.markdown(f"**Rationale**: {sent}")
