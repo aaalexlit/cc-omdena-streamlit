@@ -185,17 +185,34 @@ CLIMATE-FEVER dataset.
 
 ## Fine-tuning MultiVerS Model on CLIMATE-FEVER dataset
 
-1. **Modify CLIMATE-FEVER combining the evidence sentences into pseudo-abstracts** 
+1. **Modify CLIMATE-FEVER** combining the evidence sentences into pseudo-abstracts 
 by grouping the ones that come from the same Wikipedia article.   
 The resulting dataset is a slightly shortened version of CLIMATE-FEVER. The cutoff 
-was needed to overcome 
-2. **Fine-tune**. 
-Pre-trained Multivers model (https://github.com/dwadden/multivers/blob/main/doc/training.md#multivers-model-training)
-was used as a base for fine-tuning
-It was done partly on Kaggle, partly using Google Colab to leverage 
-free GPU and took several days to perform.
-Currently, the model checkpoint with the best rationale classification score is used
+was needed to overcome the fact that Wikipedia articles are much longer than
+scientific paper abstracts  
+All the modification code can be found 
+in [this repo](https://github.com/aaalexlit/convert-CF-to-multivers)
+2. **Fine-tune**.  
+[Pre-trained Multivers model](https://github.com/dwadden/multivers/blob/main/doc/training.md#multivers-model-training)
+was used as a base for fine-tuning.  
+I used the code shared by the MultiVerS paper authors, replacing their dataset for fine-tuning
+   with the one obtained on the previous step.
+I was switching back and forth between Google Colab stopping the 
+training and resuming it from the last checkpoint to leverage 
+free GPU. All-in-all it took several days to perform.
+Here are the links to the notebooks used
+   1. [Colab Notebook](https://github.com/aaalexlit/omdena_climate_change_challenge_notebooks/blob/main/finetune_multivers_on_climate_fever.ipynb)
+   2. [Kaggle Notebook](https://github.com/aaalexlit/kaggle-notebooks/blob/main/finetune-multivers-on-climate-fever-kaggle.ipynb)
+
+Currently, the model checkpoint that has **the best rationale classification score** is used
 in the application.
+
+### Potential improvements
+The provided fine-tuning code isn't set up to enable "pausing" and continuing
+training from a saved checkpoint, it's supposed to be run in one go.
+Later I realized that re-starting the fine-tuning might mess up 
+with the LR-scheduler making it start from the initial learning rate value.
+
 
 ## Advanced Options General
 
