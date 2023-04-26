@@ -33,9 +33,10 @@ Wikipedia as its source
 %%{ init: { 'theme': 'dark' } }%%
 flowchart TB
    subgraph client1 [This Application]
-      A(Media Article text or URL) -->|Split into sentences| S1("Sentence 1")
-      A:::curAppNode -->|Split into sentences| S2("Sentence 2")
-      A -->|Split into sentences| SN("...")
+      A(Media Article text or URL):::curAppNode --> COR{"Co-reference resolution \n (Optional)"}
+      COR:::curAppNode -->|Split into sentences| S1("Sentence 1")
+      COR -->|Split into sentences| S2("Sentence 2")
+      COR -->|Split into sentences| SN("...")
       S1:::curAppNode --> CR{"Climate related?\n (Optional)"}
       S2:::curAppNode --> CR
       SN:::curAppNode --> CR
@@ -46,15 +47,16 @@ flowchart TB
    subgraph API [Evidence Retrieval/Verification API]
       IC -- Yes ---> E["Retrieve Top k most similar evidences"]
       E --> R["Re-rank using citation metrics (Optional)"]
-      R --> VC[["Validate with Climate-BERT based model"]]
+      R --> VC[["Verify with Climate-BERT based model"]]
    end
    subgraph client2 [ This Application ]
-      R ---> VM[["Validate with MultiVerS"]]
+      R ---> VM[["Verify with MultiVerS"]]
       VC --> D["Display predictions"]
       VM:::curAppNode --> D:::curAppNode
    end
     style R stroke:#808080,stroke-width:2px,stroke-dasharray: 5 5
     style CR stroke:#808080,stroke-width:2px,stroke-dasharray: 5 5
+    style COR stroke:#808080,stroke-width:2px,stroke-dasharray: 5 5
     style IC stroke:#808080,stroke-width:2px,stroke-dasharray: 5 5
     classDef curAppNode fill:#F7BEC0,color:#C85250
     style client1 fill:#E9EAE0,color:#E7625F
@@ -134,7 +136,101 @@ that predicts a phrase to be one of:
 - Unimportant Factual Statement (UFS)
 - Check-worthy Factual Statement (CFS)
 
-The performance is far from ideal for the reasons described [here](doc/discussion.md#claim-detection)
+The performance is far from ideal partly 
+for the reasons discussed [here](doc/discussion.md#claim-detection)
+
+## Scientific claim verification
+Scientific claim verification task requires an NLP system to label scientific
+documents which SUPPORT or REFUTE an input claim and to select evidentiary 
+sentences (rationales) justifying each predicted label [[4]](#references)  
+
+Two different approaches are currently available
+
+### ClimateBERT-based classifier fine-tuned on CLIMATE-FEVER
+
+With this approach 
+1. k most relevant to a given claim sentences from scientific
+article abstracts (evidences) get retrieved
+2. and then the claim-evidence pair is passed to the model that classifies it 
+as SUPPORTS, REFUTES or NOT_ENOUGH_INFO.
+
+The classifier model is
+[Climatebert-fact-checking model](https://huggingface.co/amandakonet/climatebert-fact-checking) 
+available from huggingface.
+It's a ClimateBERT [[1]](#references) model fine-tuned 
+on [CLIMATE-FEVER](https://www.sustainablefinance.uzh.ch/en/research/climate-fever.html)
+dataset 
+[[3]](#references)
+
+After trying it in the wild we realized that it gives pretty modest results
+on the real-world data.  
+The main problem of this approach is that the text divided into phrases the context needed to 
+make a correct prediction gets lost. This problem can be to some limited extent 
+solved by [co-reference resolution](#co-reference-resolution) of the input text.
+
+But to definitely solve it some other approach needs to be used, and that's where 
+MultiVerS comes in
+
+### :star_struck: MultiVerS (Multitask Verification fro Science) model
+
+MultiVerS predicts a fact-checking label and identifies rationales in 
+a multitask fashion based on a shared encoding of the claim and full document 
+context.
+All the MultiVerS models from the original publication [[4]](#references)  
+are trained and fine-tuned on the 
+out-of-domain data (FEVER dataset + mostly biomedical scientific articles)
+
+For the purposes of this project MultiVerS model was fine-tuned on the modified
+CLIMATE-FEVER dataset.
+
+## Fine-tuning MultiVerS Model on CLIMATE-FEVER dataset
+
+1. **Modify CLIMATE-FEVER combining the evidence sentences into pseudo-abstracts** 
+by grouping the ones that come from the same Wikipedia article.   
+The resulting dataset is a slightly shortened version of CLIMATE-FEVER. The cutoff 
+was needed to overcome 
+2. **Fine-tune**. 
+Pre-trained Multivers model (https://github.com/dwadden/multivers/blob/main/doc/training.md#multivers-model-training)
+was used as a base for fine-tuning
+It was done partly on Kaggle, partly using Google Colab to leverage 
+free GPU and took several days to perform.
+Currently, the model checkpoint with the best rationale classification score is used
+in the application.
+
+## Advanced Options General
+
+### Evidence re-ranking
+Discussed in detail 
+[in the API documentation](https://github.com/aaalexlit/cc-evidences-api/tree/main#evidence-re-ranking)
+
+### Co-reference resolution
+By dividing an abstract into separate phrases, the context gets lost
+To try to partly solve this problem co-reference resolution 
+is offered as an option. But of course it has quite limited performance in 
+this regard.  
+[Fastcoref library](https://pypi.org/project/fastcoref/) along with spaCy 
+is used to perform this task
+
+### Top evidence number to retrieve
+
+### Evidence similarity threshold
+
+## Advanced Options ClimateBERT-based model 
+
+### Include title during verification
+If turned on, abstract title is concatenated with the relevant phrase from
+the abstract and this combined evidence phrase is passed along with the claim to 
+the ClimateBERT-based classifier. This option is an attempt to give the 
+verification model more context.
+
+### Retrieve evidence abstracts
+If selected 
+
+### Show NEI (NOT ENOUGH INFORMATION)
+By default, only evidences predicted to be supporting or refuting are displayed
+With this option on the neutral (NOT ENOUGH INFORMATION) evidences are also
+displayed.
+It's a way to get all the relevant evidence retrieved
 
 ## Discussion and next steps
 Please refer to the [Discussion](doc/discussion.md)
@@ -151,3 +247,6 @@ A dataset for climate change topic detection. arXiv preprint arXiv:2012.00483.
 Leippold, Markus (2020). CLIMATE-FEVER: A Dataset for Verification of Real-World Climate 
 Claims. In: Tackling Climate Change with Machine Learning workshop at NeurIPS 2020, Online, 
 11 December 2020 - 11 December 2020.
+4. Wadden, D., Lo, K., Wang, L.L., Cohan, A., Beltagy, I., & Hajishirzi, H. (2021). 
+MultiVerS: Improving scientific claim verification with weak supervision and full-document 
+context. NAACL-HLT.
