@@ -25,6 +25,7 @@ dataset available in the climate change domain is
 dataset [[3]](#references) that features sentence granularity and uses
 Wikipedia as its source
 
+![Application UI](streamlit_app.gif)
 ## General workflow
 
 ### Scientific verification
